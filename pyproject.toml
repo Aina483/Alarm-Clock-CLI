@@ -17,3 +17,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["alarm_clock"]
+
+[project.scripts]
+alarmclock = "alarm_clock.main:main"

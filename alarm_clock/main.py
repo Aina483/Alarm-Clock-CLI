@@ -1,5 +1,4 @@
-def main():
-    print("Hello from alarm-clock-python-cli!")
+from .cli import main
 
 
 if __name__ == "__main__":
