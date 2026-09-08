@@ -1,119 +1,94 @@
 # Alarm Clock — Python CLI
 
-A lightweight command-line alarm clock application built in Python.
+A lightweight command-line alarm clock built in Python as part of a time-boxed software engineering assessment.
 
-The application allows users to create, view, remove, enable, disable, and run alarms directly from the terminal. Alarm state is persisted locally using a JSON file, with no database or external service.
+The application supports alarm creation, recurrence, snoozing, dismissal, enable/disable controls, JSON persistence, and a foreground scheduler loop.
+
+The implementation intentionally uses the Python standard library for the application itself, with `pytest` used for testing.
 
 ---
 
-## Requirements
+## 1. Requirements
 
 ### Functional Requirements
 
 The application supports:
 
-* Create an alarm with a time and optional label.
-* List configured alarms.
-* Remove an alarm.
-* Enable or disable an alarm.
-* Support multiple alarm recurrence modes:
+* Add an alarm
+* List alarms
+* Remove an alarm
+* Enable an alarm
+* Disable an alarm
+* Run the alarm clock
+* Snooze a ringing alarm
+* Dismiss a ringing alarm
+* Recurring alarms:
 
   * `once`
   * `daily`
   * `weekdays`
   * `weekends`
-* Run a background scheduler that continuously checks for due alarms.
-* Trigger an alarm when its scheduled time is reached.
-* Snooze an alarm for a configurable number of minutes.
-* Dismiss an alarm.
-* Persist alarm state between application runs.
+* Persistent alarm state across application restarts
 
-### Technical Requirements
+### Non-Functional Requirements
 
-* Python CLI application.
-* No web UI.
-* No React or frontend framework.
-* No database.
-* Standard Python libraries are preferred where possible.
-* Alarm data is persisted using a local JSON file.
-* Core scheduling logic should be independently testable.
-* CLI, scheduling, persistence, and notification responsibilities should remain separated.
+* CLI only
+* No web UI
+* No database
+* Foreground process
+* JSON-based persistence
+* Approximately one-second scheduler polling interval
+* Clear separation between domain logic, persistence, scheduling, and presentation
+* Automated tests for core behavior
 
 ---
 
-## Design Scope
+## 2. Scope
 
-The application is intentionally designed as a small, modular CLI rather than a large framework-based application.
+### Included
 
-The main design goals are:
+* Multiple alarms
+* Unique alarm IDs
+* Alarm labels
+* Recurrence
+* Snooze
+* Enable/disable
+* Persistent state
+* Runtime alarm detection
+* Terminal-based alarm notification
+* CLI validation
+* Automated tests
 
-1. **Separation of concerns**
-2. **Simple persistence**
-3. **Testable business logic**
-4. **Minimal dependencies**
-5. **Clear CLI interface**
-6. **Easy future extension**
+### Out of Scope
 
-### Project Structure
+The following were intentionally excluded to keep the implementation focused:
 
-```text
-Alarm_clock_python_cli/
-│
-├── alarm_clock/
-│   ├── __init__.py
-│   ├── main.py
-│   ├── models.py
-│   ├── storage.py
-│   ├── scheduler.py
-│   ├── cli.py
-│   └── ringer.py
-│
-├── tests/
-│   ├── test_models.py
-│   ├── test_storage.py
-│   ├── test_scheduler.py
-│   ├── test_cli.py
-│   └── test_ringer.py
-│
-├── data/
-│   └── alarms.json
-│
-├── pyproject.toml
-├── uv.lock
-├── README.md
-└── .gitignore
-```
+* Web or graphical UI
+* Database persistence
+* Background daemon/service
+* Multi-user support
+* Timezone management
+* DST-specific behavior
+* Arbitrary weekday combinations
+* Concurrent writers/file locking
+* In-place alarm editing
+* Distributed scheduling
 
 ---
 
-# Architecture
+## 3. Architecture
 
-The application is divided into several small components.
+The application is split into small components with clear responsibilities:
 
 ```text
-                     ┌──────────────┐
-                     │    main.py   │
-                     │ Entry Point  │
-                     └──────┬───────┘
-                            │
-                            ▼
-                     ┌──────────────┐
-                     │    cli.py    │
-                     │ User Commands│
-                     └──────┬───────┘
-                            │
-             ┌──────────────┼──────────────┐
-             ▼              ▼              ▼
-       ┌──────────┐   ┌────────────┐  ┌──────────┐
-       │ models.py│   │ scheduler  │  │ storage  │
-       │  Alarm   │   │ Due Logic  │  │ JSON I/O │
-       └──────────┘   └─────┬──────┘  └──────────┘
-                             │
-                             ▼
-                       ┌──────────┐
-                       │ ringer.py│
-                       │ Notify   │
-                       └──────────┘
+alarm_clock/
+│
+├── main.py
+├── cli.py
+├── models.py
+├── storage.py
+├── schedular.py
+└── ringer.py
 ```
 
 ### Responsibility of Each Module
@@ -122,266 +97,348 @@ The application is divided into several small components.
 
 Defines the `Alarm` domain model.
 
-An alarm contains:
+Responsible for:
 
-* ID
-* Time
-* Label
-* Repeat mode
-* Enabled/disabled state
-* Snooze duration
-* Last triggered date
-* Snoozed-until timestamp
+* Alarm state
+* Alarm creation
+* Serialization/deserialization
 
-The model also provides serialization helpers for JSON persistence.
+The model is intentionally dependency-light and uses a dataclass.
 
 ---
 
 #### `storage.py`
 
-Responsible only for persistence.
+Responsible only for JSON persistence.
 
-It:
+Responsibilities:
 
-* Loads alarms from the JSON file.
-* Saves alarms to the JSON file.
-* Creates the data file when necessary.
-* Converts between `Alarm` objects and JSON-compatible dictionaries.
+* Load alarms
+* Save alarms
+* Handle missing storage files
+* Detect corrupted storage
+* Expose file modification time for runtime change detection
 
-The storage layer does not decide whether an alarm is due.
+Storage has no knowledge of:
+
+* recurrence
+* due dates
+* snoozing
+* ringing
+* CLI behavior
+
+This keeps persistence independent from scheduling.
 
 ---
 
-#### `scheduler.py`
+#### `schedular.py`
 
-Contains the core alarm scheduling logic.
+Contains the core scheduling logic.
 
-It determines:
+Responsibilities:
 
-* Whether an alarm is enabled.
-* Whether its scheduled time has been reached.
-* Whether the alarm has already fired for the current day.
-* Whether its repeat pattern matches the current day.
-* The next occurrence of an alarm.
-* Snooze and dismissal state.
+* Determine whether an alarm is due
+* Evaluate recurrence rules
+* Handle snooze state
+* Prevent duplicate firing
+* Calculate the next occurrence
+* Run the foreground scheduler loop
+* Reload persisted state when the storage file changes
 
-The scheduler is kept separate from the CLI so the scheduling rules can be tested independently.
+This is the main business-logic layer of the application.
 
 ---
 
 #### `ringer.py`
 
-Responsible for notifying the user when an alarm is triggered.
+Handles the interaction that occurs when an alarm fires.
 
-The scheduler decides:
+Responsibilities:
 
-```text
-"Is this alarm due?"
-```
+* Display the alarm
+* Produce a terminal bell
+* Wait for user interaction
+* Return either `dismiss` or `snooze`
 
-The ringer decides:
-
-```text
-"How should the user be notified?"
-```
-
-This separation means the notification mechanism can be changed later without modifying scheduling logic.
+The ringer does not modify alarm persistence or make scheduling decisions.
 
 ---
 
 #### `cli.py`
 
-Provides the command-line interface using Python's built-in `argparse`.
+Responsible for:
 
-It handles commands such as:
+* Argument parsing
+* Input validation
+* Command dispatch
+* User-facing error messages
 
-```text
-add
-list
-remove
-enable
-disable
-run
-```
-
-The CLI coordinates the other components but does not own their core business logic.
+The CLI delegates business logic to the appropriate modules instead of implementing scheduling itself.
 
 ---
 
 #### `main.py`
 
-Acts as the application entry point.
+Thin application entry point.
 
-It delegates execution to the CLI:
-
-```python
-from .cli import main
-
-
-if __name__ == "__main__":
-    main()
-```
+It simply delegates execution to the CLI.
 
 ---
 
-# Scheduler Design
+## 4. Dependency Direction
 
-The scheduler runs continuously when the application is started with:
-
-```bash
-uv run alarmclock run
-```
-
-The basic runtime flow is:
+The project follows a one-way dependency flow:
 
 ```text
-Start application
-       │
-       ▼
+models
+   ↓
+storage / ringer
+   ↓
+scheduler
+   ↓
+cli
+   ↓
+main
+```
+
+The intention is to avoid circular dependencies and keep individual components independently testable.
+
+---
+
+# 5. Scheduling Design
+
+The scheduler is the most important part of the application.
+
+## Polling Strategy
+
+The alarm clock runs as a foreground process and checks for due alarms approximately once per second.
+
+```text
+Start
+  ↓
 Load alarms
-       │
-       ▼
+  ↓
+Check storage modification time
+  ↓
+Reload if external changes detected
+  ↓
 Get current time
-       │
-       ▼
-Check each alarm
-       │
-       ▼
-Is alarm due?
-   ┌───┴───┐
-   │       │
-  No      Yes
-   │       │
-   │       ▼
-   │     Ringer
-   │       │
-   │       ▼
-   │   Snooze/Dismiss
-   │       │
-   └───────┘
-       │
-       ▼
-    Sleep
-       │
-       ▼
-    Repeat
+  ↓
+Evaluate alarms
+  ↓
+Ring due alarms
+  ↓
+Persist changed state
+  ↓
+Sleep
+  ↓
+Repeat
 ```
 
-The scheduler checks the alarms once per second.
+### Why Polling?
 
-Keeping the check interval at one second provides sufficient precision for a CLI alarm clock while keeping the implementation simple.
+For a small CLI application, polling provides a simple and predictable solution.
+
+More complicated approaches such as:
+
+* `threading.Timer`
+* Python's `sched`
+* OS-specific file watchers
+* background workers
+
+would introduce additional complexity without providing meaningful benefits for this assessment.
 
 ---
 
-## Recurrence
+## External Changes and File Modification Time
 
-Four recurrence modes are supported.
-
-### Once
-
-The alarm fires once and is then considered completed.
-
-```text
-07:30 → Fire
-Next day → Do not fire
-```
-
-### Daily
-
-The alarm can fire every day at the configured time.
-
-```text
-Monday    → Fire
-Tuesday   → Fire
-Wednesday → Fire
-...
-```
-
-### Weekdays
-
-The alarm fires Monday through Friday.
-
-```text
-Monday    → Fire
-Tuesday   → Fire
-Wednesday → Fire
-Thursday  → Fire
-Friday    → Fire
-Saturday  → No
-Sunday    → No
-```
-
-### Weekends
-
-The alarm fires Saturday and Sunday.
-
-```text
-Monday    → No
-...
-Friday    → No
-Saturday  → Fire
-Sunday    → Fire
-```
-
----
-
-# Preventing Duplicate Triggers
-
-The scheduler keeps track of the date on which an alarm was last triggered.
+The scheduler may be running continuously while another CLI command modifies the alarms.
 
 For example:
 
 ```text
-last_triggered_on = "2026-09-08"
+Terminal 1:
+uv run alarmclock run
+
+Terminal 2:
+uv run alarmclock disable abc123
 ```
 
-This prevents the same alarm from firing repeatedly during the same minute/day while the scheduler continues running every second.
+The running scheduler therefore needs to notice that the persisted state has changed.
 
-The alarm state is persisted so that runtime state is not lost unnecessarily between operations.
+Instead of reading the JSON file every second, the scheduler tracks the file's modification time.
+
+```text
+File unchanged
+    ↓
+Keep in-memory alarms
+
+File changed
+    ↓
+Reload alarms from JSON
+```
+
+This provides cross-process state refresh while avoiding unnecessary disk reads.
 
 ---
 
-# Snooze
+# 6. Alarm Due Logic
 
-When an alarm is triggered, the user can choose to snooze or dismiss it.
+The scheduler evaluates an alarm through a small set of rules.
+
+### 1. Disabled alarms
+
+A disabled alarm is never due.
+
+### 2. Snoozed alarms
+
+If an alarm is snoozed, the snooze timestamp takes priority over its normal recurrence schedule.
+
+```text
+snoozed_until != None
+        ↓
+now >= snoozed_until
+        ↓
+fire
+```
+
+This means a snoozed alarm is not accidentally blocked by its normal scheduled time.
+
+### 3. Recurrence
+
+The scheduler checks whether the current day is valid for the alarm:
+
+```text
+once       → valid according to one-shot state
+daily      → every day
+weekdays   → Monday-Friday
+weekends   → Saturday-Sunday
+```
+
+### 4. Scheduled time
+
+The scheduler uses a `now >= scheduled_time` comparison rather than requiring an exact clock match.
+
+This allows the system to recover from a delayed scheduler tick.
 
 For example:
 
 ```text
-ALARM: Work is done
+Alarm: 07:00
 
-[s] Snooze
-[d] Dismiss
+Scheduler checks at:
+07:00:00 → due
+07:00:01 → still potentially due
+07:00:05 → still potentially due
 ```
 
-If snoozed for five minutes:
+`last_triggered_on` prevents the alarm from firing repeatedly.
 
-```text
-20:46 → Alarm
-20:46 → Snooze
-20:51 → Alarm again
-```
+### 5. Duplicate prevention
 
-The snooze duration is configurable when creating the alarm.
+After an alarm fires, its `last_triggered_on` value is updated.
+
+This prevents repeated firing during the same scheduled window.
 
 ---
 
-# Storage
+# 7. Snooze Design
 
-Because the assessment does not allow a database, the application uses a JSON file for persistence.
-
-The default storage location is:
+Snooze is represented using an absolute timestamp:
 
 ```text
-data/alarms.json
+snoozed_until = current_time + snooze_duration
 ```
+
+For example:
+
+```text
+Alarm rings at 07:00
+Snooze duration = 5 minutes
+
+snoozed_until = 07:05
+```
+
+The scheduler then checks:
+
+```text
+now >= snoozed_until
+```
+
+Using an absolute timestamp is preferable to maintaining a decrementing counter because it naturally handles delays and crossing midnight.
+
+For example:
+
+```text
+23:58 + 5 minutes
+       ↓
+00:03
+```
+
+No special midnight logic is required.
+
+---
+
+# 8. Alarm Lifecycle
+
+For a one-time alarm:
+
+```text
+Enabled
+   ↓
+Due
+   ↓
+Ring
+   ↓
+Dismiss
+   ↓
+Disabled
+```
+
+For a recurring alarm:
+
+```text
+Enabled
+   ↓
+Due
+   ↓
+Ring
+   ↓
+Dismiss
+   ↓
+Remain enabled
+   ↓
+Next occurrence
+```
+
+For snooze:
+
+```text
+Due
+ ↓
+Ring
+ ↓
+Snooze
+ ↓
+snoozed_until
+ ↓
+Ring again
+ ↓
+Dismiss / Snooze
+```
+
+---
+
+# 9. Persistence
+
+Alarm state is persisted as JSON.
 
 Example:
 
 ```json
 [
   {
-    "id": "a12b34cd",
+    "id": "a12bc345",
     "time": "07:30",
     "label": "Wake up",
     "repeat": "daily",
@@ -393,195 +450,96 @@ Example:
 ]
 ```
 
-### Why JSON?
+### Storage behavior
 
-JSON was selected because:
+#### Missing file
 
-* It is part of Python's standard library.
-* It requires no external service.
-* It satisfies the no-database requirement.
-* Alarm data is small enough that file-based persistence is sufficient.
-* It is human-readable and easy to inspect during development.
-* It keeps the implementation simple for a short build exercise.
+If the storage file does not exist:
 
-For a production application with many users or concurrent writers, a database would be more appropriate.
+```text
+load() → []
+```
+
+The application does not create a file simply because it was read.
+
+The file and parent directory are created when the first alarm is saved.
+
+#### Corrupted JSON
+
+Corrupted JSON is treated as an error rather than silently resetting the application to an empty alarm list.
+
+This avoids hiding potential data-loss conditions.
 
 ---
 
-# CLI Commands
+# 10. CLI
 
-The CLI executable is:
-
-```bash
-alarmclock
-```
-
-When using `uv`, commands can be executed with:
+The application exposes the following commands:
 
 ```bash
-uv run alarmclock
+alarmclock add <HH:MM> [--label TEXT] [--repeat MODE] [--snooze MINUTES]
+
+alarmclock list
+
+alarmclock list --all
+
+alarmclock remove <ID>
+
+alarmclock enable <ID>
+
+alarmclock disable <ID>
+
+alarmclock run [--interval SECONDS]
 ```
 
-## Show Help
+### Examples
 
-```bash
-uv run alarmclock --help
-```
-
----
-
-## Add an Alarm
-
-```bash
-uv run alarmclock add 07:30
-```
-
-With a label:
+Add a one-time alarm:
 
 ```bash
 uv run alarmclock add 07:30 --label "Wake up"
 ```
 
-With recurrence:
+Add a daily alarm:
 
 ```bash
-uv run alarmclock add 07:30 --label "Morning" --repeat daily
+uv run alarmclock add 08:00 --label "Standup" --repeat daily
 ```
 
-With a custom snooze duration:
+Add a weekday alarm:
 
 ```bash
-uv run alarmclock add 07:30 --label "Morning" --snooze 10
+uv run alarmclock add 09:00 --label "Work" --repeat weekdays
 ```
 
-Supported repeat values:
+Add a weekend alarm:
 
-```text
-once
-daily
-weekdays
-weekends
+```bash
+uv run alarmclock add 10:00 --label "Weekend" --repeat weekends
 ```
 
----
-
-## List Alarms
+List alarms:
 
 ```bash
 uv run alarmclock list
 ```
 
-Example:
-
-```text
-ID        TIME    REPEAT    ENABLED  LABEL                NEXT
-a12b34cd  07:30   daily     True     Wake up              2026-09-09 07:30
-```
-
----
-
-## Remove an Alarm
+Disable an alarm:
 
 ```bash
-uv run alarmclock remove <alarm-id>
+uv run alarmclock disable a12bc345
 ```
 
-Example:
+Enable it again:
 
 ```bash
-uv run alarmclock remove a12b34cd
+uv run alarmclock enable a12bc345
 ```
 
----
-
-## Enable an Alarm
+Remove an alarm:
 
 ```bash
-uv run alarmclock enable <alarm-id>
-```
-
----
-
-## Disable an Alarm
-
-```bash
-uv run alarmclock disable <alarm-id>
-```
-
----
-
-## Run the Alarm Clock
-
-```bash
-uv run alarmclock run
-```
-
-Example:
-
-```text
-Alarm clock running. Press Ctrl+C to stop.
-```
-
-The process continuously checks the configured alarms.
-
-Stop the scheduler with:
-
-```text
-Ctrl+C
-```
-
----
-
-# Testing
-
-The project uses `pytest`.
-
-Run the complete test suite:
-
-```bash
-uv run pytest
-```
-
-Run with more detailed output:
-
-```bash
-uv run pytest -v
-```
-
-Run a specific test module:
-
-```bash
-uv run pytest tests/test_models.py
-```
-
-```bash
-uv run pytest tests/test_storage.py
-```
-
-```bash
-uv run pytest tests/test_scheduler.py
-```
-
-```bash
-uv run pytest tests/test_cli.py
-```
-
----
-
-# End-to-End Test
-
-A simple manual end-to-end test can be performed by creating an alarm a minute or two in the future.
-
-For example:
-
-```bash
-uv run alarmclock add 21:30 --label "Test Alarm"
-```
-
-Verify it:
-
-```bash
-uv run alarmclock list
+uv run alarmclock remove a12bc345
 ```
 
 Start the scheduler:
@@ -590,40 +548,265 @@ Start the scheduler:
 uv run alarmclock run
 ```
 
-At the scheduled time, the application should trigger the ringer.
+Use a custom polling interval:
 
-This validates the complete flow:
-
-```text
-CLI
- ↓
-Alarm Model
- ↓
-JSON Storage
- ↓
-Scheduler
- ↓
-Due Check
- ↓
-Ringer
+```bash
+uv run alarmclock run --interval 2
 ```
 
 ---
 
-# Development Setup
+# 11. Terminal Alarm Interaction
 
-The project uses `uv` for Python environment and dependency management.
+When an alarm fires, the application displays a terminal notification:
 
-Sync the environment:
+```text
+========================================
+  ALARM: Wake up  (07:30)
+========================================
+
+[Enter] dismiss   [s] snooze 5m   >
+```
+
+The terminal bell is emitted repeatedly while waiting for user input.
+
+Supported actions:
+
+```text
+Enter / d / dismiss → dismiss
+s / snooze          → snooze
+```
+
+The ringing implementation uses a background thread and `threading.Event` so the terminal can continue producing the bell while the main thread waits for input.
+
+---
+
+# 12. Testing
+
+The project uses `pytest`.
+
+Run the test suite with:
+
+```bash
+uv run pytest
+```
+
+The tests focus particularly on scheduling behavior because that is the most error-prone part of the application.
+
+Coverage includes:
+
+### Scheduling
+
+* Alarm fires at scheduled time
+* Alarm does not fire when disabled
+* Duplicate firing prevention
+* Daily recurrence
+* Weekday recurrence
+* Weekend recurrence
+* Snooze behavior
+* Snooze crossing time boundaries
+* One-shot dismissal
+* Recurring alarm dismissal
+* Next occurrence calculation
+
+### Storage
+
+* Save/load round trip
+* Missing file behavior
+* Corrupted JSON handling
+* Parent directory creation
+
+### CLI
+
+* Valid time parsing
+* Single-digit hour normalization
+* Midnight
+* `23:59`
+* Invalid time rejection
+
+### Ringer
+
+The ringer interaction is isolated so it can be tested independently from scheduling and persistence.
+
+---
+
+# 13. Error Handling
+
+Expected user errors are handled at the CLI boundary.
+
+Examples include:
+
+* Invalid time format
+* Invalid repeat mode
+* Invalid snooze duration
+* Unknown alarm ID
+* Invalid polling interval
+* Corrupted alarm storage
+
+The application should provide a clear error message rather than exposing an unnecessary Python traceback for normal user mistakes.
+
+---
+
+# 14. Engineering Decisions
+
+## Why JSON instead of a database?
+
+The requirements explicitly exclude a database.
+
+The expected alarm count is small, so reading and rewriting a single JSON document is sufficient.
+
+Introducing SQLite or another database would add unnecessary complexity.
+
+---
+
+## Why polling instead of `threading.Timer`?
+
+The application needs to support multiple alarms and state changes coming from separate CLI invocations.
+
+A centralized polling loop makes it easier to:
+
+* detect newly added alarms
+* detect disabled/removed alarms
+* handle recurrence
+* handle snooze
+* recover from delayed scheduler ticks
+
+---
+
+## Why use `last_triggered_on`?
+
+Because the scheduler checks frequently.
+
+Without duplicate protection, an alarm scheduled for `07:00` could potentially fire multiple times while the current time remains inside the `07:00` minute.
+
+`last_triggered_on` makes firing idempotent for a given day.
+
+---
+
+## Why store `snoozed_until` as a timestamp?
+
+An absolute timestamp is simpler and more robust than maintaining a countdown.
+
+It also naturally handles:
+
+* scheduler delays
+* midnight
+* different polling intervals
+
+---
+
+## Why separate the ringer?
+
+The scheduler should decide **when** an alarm is due.
+
+The ringer should decide **how the user interacts with it**.
+
+This separation makes the scheduling logic testable without requiring terminal input.
+
+---
+
+# 15. Commit Strategy
+
+Implementation was developed incrementally through focused commits.
+
+The progression was:
+
+```text
+chore: initialize alarm clock project
+feat: add alarm domain model
+feat: add alarm persistence
+feat: implement alarm scheduling logic
+feat: add command line interface
+feat: add application entry point
+feat: add alarm runtime loop
+feat: handle alarm lifecycle and recurrence
+fix: improve CLI validation and error handling
+docs: add project documentation
+```
+
+The intent was to keep each commit focused on one logical change rather than combining unrelated functionality.
+
+---
+
+# 16. Code Quality Principles
+
+The implementation prioritizes:
+
+### Separation of concerns
+
+Each module has a single primary responsibility.
+
+### Small functions
+
+Scheduling rules are broken into focused functions such as:
+
+```python
+is_due()
+snooze()
+dismiss()
+next_occurrence()
+```
+
+### Minimal dependencies
+
+The application itself relies on the Python standard library.
+
+### Testability
+
+The scheduler is largely deterministic because it receives the current time as an argument.
+
+This makes edge cases straightforward to test without depending on the actual system clock.
+
+### Explicit state
+
+Alarm lifecycle state such as:
+
+```text
+enabled
+last_triggered_on
+snoozed_until
+```
+
+is stored explicitly rather than inferred from side effects.
+
+### Defensive validation
+
+User-facing inputs are validated at the CLI boundary.
+
+---
+
+# 17. Limitations
+
+This implementation is intentionally scoped for a small single-user CLI application.
+
+Known limitations include:
+
+* No timezone/DST support
+* No concurrent file locking
+* JSON is not suitable for very large alarm datasets
+* Terminal bell behavior depends on the terminal/OS configuration
+* No background daemon
+* Only predefined recurrence modes are supported
+* No web or graphical interface
+* No audio file playback
+* File-based persistence assumes a single logical writer
+
+These limitations are deliberate rather than accidental scope expansion.
+
+---
+
+# 18. Running the Project
+
+Install dependencies:
 
 ```bash
 uv sync
 ```
 
-Run Python through the project environment:
+Run the CLI:
 
 ```bash
-uv run python
+uv run alarmclock --help
 ```
 
 Run tests:
@@ -632,173 +815,79 @@ Run tests:
 uv run pytest
 ```
 
-Run the application:
+Start the alarm clock:
 
 ```bash
-uv run alarmclock
-```
-
----
-
-# Design Decisions
-
-### Standard Library First
-
-The implementation uses Python's standard library where practical:
-
-* `argparse` — CLI parsing
-* `json` — persistence format
-* `pathlib` — filesystem handling
-* `datetime` — time/date calculations
-* `dataclasses` — alarm model
-* `uuid` — alarm IDs
-* `time` — scheduler loop
-
-This minimizes dependencies and keeps the application portable.
-
-### No Database
-
-The assessment explicitly excludes database usage.
-
-A JSON file provides sufficient persistence for the expected scale of the application.
-
-### Pure Scheduling Logic
-
-Scheduling decisions are separated from the infinite runtime loop.
-
-This makes functions such as `is_due()` and `next_occurrence()` independently testable.
-
-### Dependency Direction
-
-The design keeps responsibilities flowing toward the domain rather than making every module depend on every other module.
-
-```text
-CLI
- │
- ├── Storage
- ├── Scheduler
- └── Domain Model
-
-Scheduler
- │
- └── Domain Model
-
-Storage
- │
- └── Domain Model
-
-Ringer
- │
- └── Domain Model
-```
-
----
-
-# Known Limitations
-
-This is intentionally a lightweight CLI application rather than a production-grade alarm service.
-
-Current limitations include:
-
-* The scheduler must remain running for alarms to trigger.
-* Closing the terminal stops the scheduler.
-* JSON storage is not designed for concurrent writes.
-* There is no OS-level background service.
-* Notification behavior is terminal-based.
-* Timezone support is not explicitly modeled.
-* There is no recurring custom schedule such as "every Monday and Wednesday."
-* There is no authentication or multi-user support.
-* The application does not synchronize alarms across machines.
-
-These trade-offs keep the implementation appropriate for the scope of the assessment.
-
----
-
-# Future Improvements
-
-If this were expanded beyond the assessment, possible improvements would include:
-
-* OS-native notifications.
-* Cross-platform audio notification support.
-* Background service/daemon support.
-* Timezone-aware scheduling.
-* More flexible recurrence rules.
-* SQLite or PostgreSQL for persistent storage.
-* Structured logging.
-* Configuration management.
-* Better concurrency handling.
-* Packaging and distribution as an installable CLI.
-* Integration tests for the complete scheduler lifecycle.
-
----
-
-# Running the Application — Quick Reference
-
-```bash
-# Install/sync dependencies
-uv sync
-
-# Run all tests
-uv run pytest
-
-# Run tests with verbose output
-uv run pytest -v
-
-# Show CLI help
-uv run alarmclock --help
-
-# Add alarm
-uv run alarmclock add 07:30 --label "Wake up"
-
-# Add daily alarm
-uv run alarmclock add 07:30 --label "Morning" --repeat daily
-
-# List alarms
-uv run alarmclock list
-
-# Remove alarm
-uv run alarmclock remove <alarm-id>
-
-# Enable alarm
-uv run alarmclock enable <alarm-id>
-
-# Disable alarm
-uv run alarmclock disable <alarm-id>
-
-# Start scheduler
 uv run alarmclock run
 ```
 
 ---
 
-## Summary
-
-The application follows a modular architecture where each component has a focused responsibility:
+# 19. Example End-to-End Flow
 
 ```text
-models.py
-    ↓
-Domain representation
+$ uv run alarmclock add 20:46 --label "Work is done"
 
-storage.py
-    ↓
-Persistence
-
-scheduler.py
-    ↓
-Scheduling decisions
-
-ringer.py
-    ↓
-Alarm notification
-
-cli.py
-    ↓
-User interaction
-
-main.py
-    ↓
-Application entry point
+Added alarm 8f31c2a1: 20:46 (once) 'Work is done'
 ```
 
-The result is a small, testable, dependency-light alarm clock that satisfies the CLI-only and no-database constraints while leaving clear extension points for future functionality.
+Then:
+
+```text
+$ uv run alarmclock list
+
+ID        TIME    REPEAT    ENABLED  LABEL               NEXT
+8f31c2a1  20:46   once      True     Work is done        2026-09-09 20:46
+```
+
+Start the scheduler:
+
+```text
+$ uv run alarmclock run
+
+Alarm clock running. Press Ctrl+C to stop.
+
+========================================
+  ALARM: Work is done  (20:46)
+========================================
+
+[Enter] dismiss   [s] snooze 5m   >
+```
+
+Pressing Enter dismisses the alarm.
+
+For a one-time alarm, it becomes disabled after dismissal.
+
+---
+
+# 20. Summary
+
+This project intentionally favors **simple, explicit engineering over unnecessary complexity**.
+
+The core design consists of:
+
+```text
+Dataclass
+    ↓
+JSON Persistence
+    ↓
+Polling Scheduler
+    ↓
+Recurrence + Snooze State
+    ↓
+Terminal Ringer
+    ↓
+CLI
+```
+
+The most important design considerations were:
+
+* Clear separation of responsibilities
+* Cross-process persistence awareness
+* Robust due-time detection
+* Explicit alarm lifecycle state
+* Snooze handling using absolute timestamps
+* Duplicate-fire prevention
+* Automated testing of scheduling edge cases
+* Minimal dependencies
+* Deliberately constrained scope
